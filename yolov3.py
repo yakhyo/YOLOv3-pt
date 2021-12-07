@@ -53,6 +53,7 @@ class Bottleneck(nn.Module):
         return x + self.conv2(self.conv1(x)) if self.add else self.conv2(self.conv1(x))
 
 
+# YOLOv3 backbone
 class DarkNet(nn.Module):
     def __init__(self):
         super(DarkNet, self).__init__()
@@ -89,9 +90,9 @@ class DarkNet(nn.Module):
         return nn.Sequential(*layers)
 
 
-class FPN(nn.Module):
+class Head(nn.Module):
     def __init__(self):
-        super(FPN, self).__init__()
+        super(Head, self).__init__()
         self.h11 = Bottleneck(1024, 1024, shortcut=False)  # 11
         self.h12 = Conv(1024, 512, 1, 1)  # 12
         self.h13 = Conv(512, 1024, 3, 1)  # 13
@@ -179,3 +180,8 @@ class Detect(nn.Module):
         anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(
             (1, self.na, ny, nx, 2)).float()
         return grid, anchor_grid
+
+
+class YOLOv3(nn.Module):
+    def __init__(self):
+        super(YOLOv3, self).__init__()
