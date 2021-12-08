@@ -18,18 +18,23 @@ def check_anchor_order(m):
         m.anchor_grid[:] = m.anchor_grid.flip(0)
 
 
-def pad(k, p=None):  # kernel, padding
+def _pad(k, p=None):  # kernel, padding
     # Pad to 'same'
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
     return p
 
 
+def _make_layers(block, channels, num_blocks):
+    layers = [block(channels, channels) for _ in range(num_blocks)]
+    return nn.Sequential(*layers)
+
+
 class Conv(nn.Module):
     # Standard convolution
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, pad(k, p), groups=g, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, _pad(k, p), groups=g, bias=False)
         self.norm = nn.BatchNorm2d(c2)
         self.act = nn.SiLU() if act else (act if isinstance(act, nn.Module) else nn.Identity())
 
@@ -59,15 +64,15 @@ class DarkNet(nn.Module):
         super(DarkNet, self).__init__()
         self.b0 = Conv(3, 32, 3, 1)  # 0
         self.b1 = Conv(32, 64, 3, 2)  # 1-P1/2
-        self.b2 = self._make_layers(Bottleneck, 64, num_blocks=1)  # 2
+        self.b2 = _make_layers(Bottleneck, 64, num_blocks=1)  # 2
         self.b3 = Conv(64, 128, 3, 2)  # 3-P2/4
-        self.b4 = self._make_layers(Bottleneck, 128, num_blocks=2)  # 4
+        self.b4 = _make_layers(Bottleneck, 128, num_blocks=2)  # 4
         self.b5 = Conv(128, 256, 3, 2)  # 5-P3/8
-        self.b6 = self._make_layers(Bottleneck, 256, num_blocks=8)  # 6
+        self.b6 = _make_layers(Bottleneck, 256, num_blocks=8)  # 6
         self.b7 = Conv(256, 512, 3, 2)  # 7-P4/16
-        self.b8 = self._make_layers(Bottleneck, 512, num_blocks=8)  # 8
+        self.b8 = _make_layers(Bottleneck, 512, num_blocks=8)  # 8
         self.b9 = Conv(512, 1024, 3, 2)  # 9-P5/32
-        self.b10 = self._make_layers(Bottleneck, 1024, num_blocks=4)  # 10
+        self.b10 = _make_layers(Bottleneck, 1024, num_blocks=4)  # 10
 
     def forward(self, x):
         b0 = self.b0(x)
@@ -83,11 +88,6 @@ class DarkNet(nn.Module):
         b10 = self.b10(b9)
 
         return b6, b8, b10
-
-    @staticmethod
-    def _make_layers(block, channels, num_blocks):
-        layers = [block(channels, channels) for _ in range(num_blocks)]
-        return nn.Sequential(*layers)
 
 
 class Head(nn.Module):
