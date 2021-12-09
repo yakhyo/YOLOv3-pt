@@ -48,16 +48,35 @@ class SPP(nn.Module):
         self.conv1 = Conv(c1, c_, 1, 1)
         self.conv2 = Conv(c_ * (len(k) + 1), c2, 1, 1)
 
-        self.pool0 = nn.MaxPool2d(k[0], 1, pad(k[0]))
-        self.pool1 = nn.MaxPool2d(k[1], 1, pad(k[1]))
-        self.pool2 = nn.MaxPool2d(k[2], 1, pad(k[2]))
+        self.pool0 = nn.MaxPool2d(kernel_size=k[0], stride=1, padding=pad(k[0]))
+        self.pool1 = nn.MaxPool2d(kernel_size=k[1], stride=1, padding=pad(k[1]))
+        self.pool2 = nn.MaxPool2d(kernel_size=k[2], stride=1, padding=pad(k[2]))
 
     def forward(self, x):
         x = self.conv1(x)
         pool0 = self.pool0(x)
         pool1 = self.pool1(x)
         pool2 = self.pool2(x)
-        x = torch.cat([x, pool0, pool1, pool2], 1)
+        x = torch.cat([x, pool0, pool1, pool2], dim=1)
+
+        return self.conv2(x)
+
+
+class SPPF(nn.Module):
+    # Spatial Pyramid Pooling - Fast (SPPF)
+    def __init__(self, c1, c2, k=5):
+        super(SPPF, self).__init__()
+        c_ = c1 // 2
+        self.conv1 = Conv(c1, c_, 1, 1)
+        self.conv2 = Conv(4 * c_, c2, 1, 1)
+        self.pool = nn.MaxPool2d(kernel_size=k, stride=1, padding=pad(k))
+
+    def forward(self, x):
+        x = self.conv1(x)
+        pool0 = self.pool(x)
+        pool1 = self.pool(pool0)
+        pool2 = self.pool(pool1)
+        x = torch.cat([x, pool0, pool1, pool2], dim=1)
 
         return self.conv2(x)
 
