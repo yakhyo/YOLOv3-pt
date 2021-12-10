@@ -6,7 +6,8 @@ anchors = [[10, 14, 23, 27, 37, 58],
            [81, 82, 135, 169, 344, 319]]
 
 
-def pad(k, p=None):
+# Pad to 'same'
+def _pad(k, p=None):
     if p is None:
         p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
     return p
@@ -16,7 +17,7 @@ def pad(k, p=None):
 class Conv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
         super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, pad(k, p), groups=g, bias=False)
+        self.conv = nn.Conv2d(c1, c2, k, s, _pad(k, p), groups=g, bias=False)
         self.norm = nn.BatchNorm2d(c2)
         self.act = nn.SiLU() if act else (act if isinstance(act, nn.Module) else nn.Identity())
 
@@ -29,7 +30,6 @@ class Conv(nn.Module):
 
 # YOLOv3 tiny backbone
 class DarkNet(nn.Module):
-
     def __init__(self, filters):
         super(DarkNet, self).__init__()
         self.b0 = Conv(filters[0], filters[1], 3, 1)  # 0
@@ -66,16 +66,16 @@ class DarkNet(nn.Module):
 
 # YOLOv3 tiny head
 class Head(nn.Module):
-    def __init__(self):
+    def __init__(self, filters):
         super(Head, self).__init__()
-        self.h13 = Conv(512, 1024, 3, 1)  # 13
-        self.h14 = Conv(1024, 256, 1, 1)  # 14
-        self.h15 = Conv(256, 512, 3, 1)  # 15 (P5/32-large)
+        self.h13 = Conv(filters[6], filters[7], 3, 1)  # 13
+        self.h14 = Conv(filters[7], filters[5], 1, 1)  # 14
+        self.h15 = Conv(filters[5], filters[6], 3, 1)  # 15 (P5/32-large)
 
-        self.h16 = Conv(256, 128, 1, 1)  # 16
+        self.h16 = Conv(filters[5], filters[4], 1, 1)  # 16
         self.h17 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 17
         # self.h18 Concat backbone P4 # 18
-        self.h19 = Conv(384, 256, 3, 1)  # 19 (P4/16-medium)
+        self.h19 = Conv(filters[4] + filters[5], filters[5], 3, 1)  # 19 (P4/16-medium)
 
     def forward(self, x):
         p4, p5 = x
@@ -138,9 +138,9 @@ class Detect(nn.Module):
 class YOLOv3(nn.Module):
     def __init__(self):
         super(YOLOv3, self).__init__()
-        filters = [3, 16, 32, 64, 128, 256, 512]
+        filters = [3, 16, 32, 64, 128, 256, 512, 1024]
         self.backbone = DarkNet(filters)
-        self.head = Head()
+        self.head = Head(filters)
         self.detect = Detect(anchors=anchors, ch=(512, 256))
         img = torch.zeros(1, 3, 256, 256)
         self.detect.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img)])
@@ -173,4 +173,6 @@ class YOLOv3(nn.Module):
 
 if __name__ == '__main__':
     net = YOLOv3()
+    img = torch.randn(1, 3, 640, 640)
+    res = net(img)
     print("Num. of parameters: {}".format(sum(p.numel() for p in net.parameters() if p.requires_grad)))

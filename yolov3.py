@@ -82,28 +82,28 @@ class DarkNet(nn.Module):
 
 # YOLOv3 head - FPN (Feature Pyramid Network)
 class Head(nn.Module):
-    def __init__(self):
+    def __init__(self, filters):
         super(Head, self).__init__()
-        self.h11 = Bottleneck(1024, 1024, shortcut=False)  # 11
-        self.h12 = Conv(1024, 512, 1, 1)  # 12
-        self.h13 = Conv(512, 1024, 3, 1)  # 13
-        self.h14 = Conv(1024, 512, 1, 1)  # 14
-        self.h15 = Conv(512, 1024, 3, 1)  # 15 (P5/32-large)
+        self.h11 = Bottleneck(filters[6], filters[6], shortcut=False)  # 11
+        self.h12 = Conv(filters[6], filters[5], 1, 1)  # 12
+        self.h13 = Conv(filters[5], filters[6], 3, 1)  # 13
+        self.h14 = Conv(filters[6], filters[5], 1, 1)  # 14
+        self.h15 = Conv(filters[5], filters[6], 3, 1)  # 15 (P5/32-large)
 
-        self.h16 = Conv(512, 256, 1, 1)  # 16
+        self.h16 = Conv(filters[5], filters[4], 1, 1)  # 16
         self.h17 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 17
         # self.h18: cat backbone P4 # 18
-        self.h19 = Bottleneck(768, 512, shortcut=False)  # 19
-        self.h20 = Bottleneck(512, 512, shortcut=False)  # 20
-        self.h21 = Conv(512, 256, 1, 1)  # 21
-        self.h22 = Conv(256, 512, 3, 1)  # 22 (P4/16-medium)
+        self.h19 = Bottleneck(filters[5] + filters[4], filters[5], shortcut=False)  # 19
+        self.h20 = Bottleneck(filters[5], filters[5], shortcut=False)  # 20
+        self.h21 = Conv(filters[5], filters[4], 1, 1)  # 21
+        self.h22 = Conv(filters[4], filters[5], 3, 1)  # 22 (P4/16-medium)
 
-        self.h23 = Conv(256, 128, 1, 1)  # 23
+        self.h23 = Conv(filters[4], filters[3], 1, 1)  # 23
         self.h24 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 24
         # self.h25: cat backbone P3 # 25
-        self.h26 = Bottleneck(384, 256, shortcut=False)  # 26
-        self.h27 = nn.Sequential(Bottleneck(256, 256, shortcut=False),  # 27 (P3/8-small)
-                                 Bottleneck(256, 256, shortcut=False))
+        self.h26 = Bottleneck(filters[4] + filters[3], filters[4], shortcut=False)  # 26
+        self.h27 = nn.Sequential(Bottleneck(filters[4], filters[4], shortcut=False),  # 27 (P3/8-small)
+                                 Bottleneck(filters[4], filters[4], shortcut=False))
 
     def forward(self, x):
         p3, p4, p5 = x
@@ -182,7 +182,7 @@ class YOLOv3(nn.Module):
         blocks = [1, 2, 4, 8]
         filters = [3, 32, 64, 128, 256, 512, 1024]
         self.backbone = DarkNet(filters, blocks)
-        self.head = Head()
+        self.head = Head(filters)
         self.detect = Detect(anchors=anchors, ch=(1024, 512, 256))
         img = torch.zeros(1, 3, 256, 256)
         self.detect.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img)])
@@ -216,4 +216,8 @@ class YOLOv3(nn.Module):
 
 if __name__ == '__main__':
     net = YOLOv3()
+    net.eval()
+    img = torch.randn(1, 3, 640, 640)
+    res = net(img)
+    print(res[2])
     print("Num. of parameters: {}".format(sum(p.numel() for p in net.parameters() if p.requires_grad)))
