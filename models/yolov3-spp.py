@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 
@@ -70,7 +71,7 @@ class SPPF(nn.Module):
         c_ = c1 // 2
         self.conv1 = Conv(c1, c_, 1, 1)
         self.conv2 = Conv(4 * c_, c2, 1, 1)
-        self.pool = nn.MaxPool2d(kernel_size=k, stride=1, padding=pad(k))
+        self.pool = nn.MaxPool2d(kernel_size=k, stride=1, padding=_pad(k))
 
     def forward(self, x):
         x = self.conv1(x)
@@ -86,17 +87,17 @@ class SPPF(nn.Module):
 class DarkNet(nn.Module):
     def __init__(self, filters, blocks):
         super(DarkNet, self).__init__()
-        self.b0 = Conv(3, 32, 3, 1)  # 0
-        self.b1 = Conv(32, 64, 3, 2)  # 1-P1/2
-        self.b2 = self._make_layers(Bottleneck, 64, num_blocks=blocks[0])  # 2
-        self.b3 = Conv(64, 128, 3, 2)  # 3-P2/4
-        self.b4 = self._make_layers(Bottleneck, 128, num_blocks=blocks[1])  # 4
-        self.b5 = Conv(128, 256, 3, 2)  # 5-P3/8
-        self.b6 = self._make_layers(Bottleneck, 256, num_blocks=blocks[3])  # 6
-        self.b7 = Conv(256, 512, 3, 2)  # 7-P4/16
-        self.b8 = self._make_layers(Bottleneck, 512, num_blocks=blocks[3])  # 8
-        self.b9 = Conv(512, 1024, 3, 2)  # 9-P5/32
-        self.b10 = self._make_layers(Bottleneck, 1024, num_blocks=blocks[2])  # 10
+        self.b0 = Conv(filters[0], filters[1], 3, 1)  # 0
+        self.b1 = Conv(filters[1], filters[2], 3, 2)  # 1-P1/2
+        self.b2 = self._make_layers(Bottleneck, filters[2], num_blocks=blocks[0])  # 2
+        self.b3 = Conv(filters[2], filters[3], 3, 2)  # 3-P2/4
+        self.b4 = self._make_layers(Bottleneck, filters[3], num_blocks=blocks[1])  # 4
+        self.b5 = Conv(filters[3], filters[4], 3, 2)  # 5-P3/8
+        self.b6 = self._make_layers(Bottleneck, filters[4], num_blocks=blocks[3])  # 6
+        self.b7 = Conv(filters[4], filters[5], 3, 2)  # 7-P4/16
+        self.b8 = self._make_layers(Bottleneck, filters[5], num_blocks=blocks[3])  # 8
+        self.b9 = Conv(filters[5], filters[6], 3, 2)  # 9-P5/32
+        self.b10 = self._make_layers(Bottleneck, filters[6], num_blocks=blocks[2])  # 10
 
     def forward(self, x):
         b0 = self.b0(x)
@@ -110,33 +111,38 @@ class DarkNet(nn.Module):
         b8 = self.b8(b7)
         b9 = self.b9(b8)
         b10 = self.b10(b9)
-        return b4, b8, b10
+        return b6, b8, b10
+
+    @staticmethod
+    def _make_layers(block, channels, num_blocks):
+        layers = [block(channels, channels) for _ in range(num_blocks)]
+        return nn.Sequential(*layers)
 
 
 # YOLOv3 SPP head
 class Head(nn.Module):
-    def __init__(self, filters, blocks):
+    def __init__(self, filters):
         super(Head, self).__init__()
-        self.h11 = Bottleneck(1024, 1024, shortcut=False)  # 11
-        self.h12 = SPP(1024, 512, k=(5, 9, 13))  # 12
-        self.h13 = Conv(512, 1024, 3, 1)  # 13
-        self.h14 = Conv(1024, 512, 1, 1)  # 14
-        self.h15 = Conv(512, 1024, 3, 1)  # 15 (P5/32-large)
+        self.h11 = Bottleneck(filters[6], filters[6], shortcut=False)  # 11
+        self.h12 = SPP(filters[6], filters[5], k=(5, 9, 13))  # 12
+        self.h13 = Conv(filters[5], filters[6], 3, 1)  # 13
+        self.h14 = Conv(filters[6], filters[5], 1, 1)  # 14
+        self.h15 = Conv(filters[5], filters[6], 3, 1)  # 15 (P5/32-large)
 
-        self.h16 = Conv(512, 256, 1, 1)  # 16
+        self.h16 = Conv(filters[5], filters[4], 1, 1)  # 16
         self.h17 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 17
         # self.h18 cat backbone P4 # 18
-        self.h19 = Bottleneck(256, 512, shortcut=False)  # 19
-        self.h20 = Bottleneck(512, 512, shortcut=False)  # 20
-        self.h21 = Conv(512, 256, 1, 1)  # 21
-        self.h22 = Conv(256, 512, 3, 1)  # 22 (P4/16-medium)
+        self.h19 = Bottleneck(filters[4] + filters[5], filters[5], shortcut=False)  # 19
+        self.h20 = Bottleneck(filters[5], filters[5], shortcut=False)  # 20
+        self.h21 = Conv(filters[5], filters[4], 1, 1)  # 21
+        self.h22 = Conv(filters[4], filters[5], 3, 1)  # 22 (P4/16-medium)
 
-        self.h23 = Conv(256, 128, 1, 1)  # 23
+        self.h23 = Conv(filters[4], filters[3], 1, 1)  # 23
         self.h24 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 24
         # self.h25 cat backbone P3 # 25
-        self.h26 = Bottleneck(128, 256, shortcut=False)  # 26
-        self.h27 = nn.Sequential(Bottleneck(256, 256, shortcut=False),  # 27 (P3/8-small)
-                                 Bottleneck(256, 256, shortcut=False))
+        self.h26 = Bottleneck(filters[3] + filters[4], filters[4], shortcut=False)  # 26
+        self.h27 = nn.Sequential(Bottleneck(filters[4], filters[4], shortcut=False),  # 27 (P3/8-small)
+                                 Bottleneck(filters[4], filters[4], shortcut=False))
 
     def forward(self, x):
         p3, p4, p5 = x
@@ -148,7 +154,7 @@ class Head(nn.Module):
 
         h16 = self.h16(h14)
         h17 = self.h17(h16)
-        h18 = torch.cat([h17, p4])
+        h18 = torch.cat([h17, p4], dim=1)
         h19 = self.h19(h18)
         h20 = self.h20(h19)
         h21 = self.h21(h20)
@@ -156,7 +162,7 @@ class Head(nn.Module):
 
         h23 = self.h23(h21)
         h24 = self.h24(h23)
-        h25 = torch.cat([h24, p3])
+        h25 = torch.cat([h24, p3], dim=1)
         h26 = self.h26(h25)
         h27 = self.h27(h26)  # 27 (P3/8-small)
 
@@ -165,7 +171,7 @@ class Head(nn.Module):
 
 # YOLOv3 detection head
 class Detect(nn.Module):
-    stride = None  # strides computed during build
+    stride = None
     onnx_dynamic = False  # ONNX export parameter
 
     def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
@@ -199,17 +205,15 @@ class Detect(nn.Module):
 
     def _make_grid(self, nx=20, ny=20, i=0):
         d = self.anchors[i].device
-
-        yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)], indexing='ij')
+        yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)])
         grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
-        anchor_grid = (self.anchors[i].clone() * self.stride[i]) \
-            .view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
+        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
         return grid, anchor_grid
 
 
 # YOLOv3 model
 class YOLOv3(nn.Module):
-    def __init__(self):
+    def __init__(self, anchors):
         super(YOLOv3, self).__init__()
         blocks = [1, 2, 4, 8]
         filters = [3, 32, 64, 128, 256, 512, 1024]
@@ -247,9 +251,9 @@ class YOLOv3(nn.Module):
 
 
 if __name__ == '__main__':
-    net = YOLOv3()
-    net.eval()
+    net = YOLOv3(anchors=anchors)
+    # net.eval()  # error occurs if you uncomment
     img = torch.randn(1, 3, 640, 640)
-    res = net(img)
-    print(res[2])
+    p3, p4, p5 = net(img)
+    print(p3.shape, p4.shape, p5.shape)
     print("Num. of parameters: {}".format(sum(p.numel() for p in net.parameters() if p.requires_grad)))
