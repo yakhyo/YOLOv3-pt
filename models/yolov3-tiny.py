@@ -172,7 +172,7 @@ class YOLOv3(nn.Module):
 
 if __name__ == '__main__':
     net = YOLOv3(anchors=anchors)
-    # net.eval() # error occurs if you uncomment
+    # net.eval() # error occurs, fixing...
     img = torch.randn(1, 3, 640, 640)
     p4, p5 = net(img)
     print(p4.shape, p5.shape)

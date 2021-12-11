@@ -207,7 +207,8 @@ class Detect(nn.Module):
         d = self.anchors[i].device
         yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)])
         grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
-        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
+        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(
+            (1, self.na, ny, nx, 2)).float()
         return grid, anchor_grid
 
 
@@ -252,7 +253,7 @@ class YOLOv3(nn.Module):
 
 if __name__ == '__main__':
     net = YOLOv3(anchors=anchors)
-    # net.eval()  # error occurs if you uncomment
+    # net.eval()  # error occurs, fixing...
     img = torch.randn(1, 3, 640, 640)
     p3, p4, p5 = net(img)
     print(p3.shape, p4.shape, p5.shape)
