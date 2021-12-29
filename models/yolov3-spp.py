@@ -1,3 +1,7 @@
+"""
+@author: Yakhyokhuja Valikhujaev <yakhyo9696@gmail.com>
+"""
+
 import math
 import torch
 import torch.nn as nn
