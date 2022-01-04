@@ -210,7 +210,7 @@ class YOLOv3(nn.Module):
 
         self.backbone = BACKBONE(filters, depths)
         self.head = HEAD(filters)
-        self.detect = DETECT(anchors=anchors, ch=(256, 512, 1024))
+        self.detect = DETECT(anchors=anchors, ch=(filters[4], filters[5], filters[6]))
 
         dummy_img = torch.zeros(1, 3, 256, 256)
         self.detect.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(dummy_img)])
