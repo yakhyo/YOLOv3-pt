@@ -6,6 +6,9 @@ import torch
 import torch.nn as nn
 import math
 
+depth_multiple = 1.0  # model depth multiple
+width_multiple = 1.0  # layer channel multiple
+
 anchors = [[10, 14, 23, 27, 37, 58],
            [81, 82, 135, 169, 344, 319]]
 
@@ -32,10 +35,20 @@ class Conv(nn.Module):
         return self.act(self.conv(x))
 
 
-# YOLOv3 tiny backbone
-class DarkNet(nn.Module):
+# Concatenating list of layers
+class Concat(nn.Module):
+    def __init__(self, d=1):
+        super().__init__()
+        self.d = d
+
+    def __call__(self, x):
+        return torch.cat(x, self.d)
+
+
+# YOLOv3 Tiny Backbone
+class BACKBONE(nn.Module):
     def __init__(self, filters):
-        super(DarkNet, self).__init__()
+        super(BACKBONE, self).__init__()
         self.b0 = Conv(filters[0], filters[1], 3, 1)  # 0
         self.b1 = nn.MaxPool2d(2, 2)  # 1-P1/2
         self.b2 = Conv(filters[1], filters[2], 3, 1)  # 2
@@ -68,17 +81,17 @@ class DarkNet(nn.Module):
         return b8, b12
 
 
-# YOLOv3 tiny head
-class Head(nn.Module):
+# YOLOv3 Tiny Head
+class HEAD(nn.Module):
     def __init__(self, filters):
-        super(Head, self).__init__()
+        super(HEAD, self).__init__()
         self.h13 = Conv(filters[6], filters[7], 3, 1)  # 13
         self.h14 = Conv(filters[7], filters[5], 1, 1)  # 14
         self.h15 = Conv(filters[5], filters[6], 3, 1)  # 15 (P5/32-large)
 
         self.h16 = Conv(filters[5], filters[4], 1, 1)  # 16
         self.h17 = nn.Upsample(None, scale_factor=2, mode='nearest')  # 17
-        # self.h18 Concat backbone P4 # 18
+        self.h18 = Concat()  # Concat backbone P4 # 18
         self.h19 = Conv(filters[4] + filters[5], filters[5], 3, 1)  # 19 (P4/16-medium)
 
     def forward(self, x):
@@ -89,25 +102,25 @@ class Head(nn.Module):
 
         h16 = self.h16(h14)
         h17 = self.h17(h16)
-        h18 = torch.cat([h17, p4], dim=1)
+        h18 = self.h18([h17, p4])
         h19 = self.h19(h18)  # 19 (P4/16-medium)
 
-        return h15, h19
+        return h19, h15
 
 
-# YOLOv3 detection head
-class Detect(nn.Module):
+# YOLOv3 Tiny Detection Head
+class DETECT(nn.Module):
     stride = None  # strides computed during build
     onnx_dynamic = False  # ONNX export parameter
 
-    def __init__(self, nc=80, anchors=(), ch=()):  # detection layer
+    def __init__(self, nc=80, anchors=(), ch=(), inplace=True):  # detection layer
         super().__init__()
         self.nc = nc  # number of classes
         self.no = nc + 5  # number of outputs per anchor
         self.nl = len(anchors)  # number of detection layers
         self.na = len(anchors[0]) // 2  # number of anchors
         self.grid = [torch.zeros(1)] * self.nl  # init grid
-        self.anchor_grid = torch.tensor([torch.zeros(1)] * self.nl)  # init anchor grid
+        self.anchor_grid = [torch.zeros(1)] * self.nl  # init anchor grid
         self.register_buffer('anchors', torch.tensor(anchors).float().view(self.nl, -1, 2))  # shape(nl,na,2)
         self.m = nn.ModuleList(nn.Conv2d(x, self.no * self.na, 1) for x in ch)  # output conv
 
@@ -131,53 +144,70 @@ class Detect(nn.Module):
 
     def _make_grid(self, nx=20, ny=20, i=0):
         d = self.anchors[i].device
+
         yv, xv = torch.meshgrid([torch.arange(ny).to(d), torch.arange(nx).to(d)])
         grid = torch.stack((xv, yv), 2).expand((1, self.na, ny, nx, 2)).float()
-        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand((1, self.na, ny, nx, 2)).float()
+
+        anchor_grid = (self.anchors[i].clone() * self.stride[i]).view((1, self.na, 1, 1, 2)).expand(
+            (1, self.na, ny, nx, 2)).float()
         return grid, anchor_grid
 
 
-# YOLOv3 Tiny model
+# YOLOv3 Tiny Model
 class YOLOv3(nn.Module):
     def __init__(self, anchors):
         super(YOLOv3, self).__init__()
+
         filters = [3, 16, 32, 64, 128, 256, 512, 1024]
-        self.backbone = DarkNet(filters)
-        self.head = Head(filters)
-        self.detect = Detect(anchors=anchors, ch=(512, 256))
-        img = torch.zeros(1, 3, 256, 256)
-        self.detect.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img)])
+
+        filters = [3, *[self._make_divisible(c * width_multiple, 8) for c in filters[1:]]]
+
+        self.backbone = BACKBONE(filters)
+        self.head = HEAD(filters)
+        self.detect = DETECT(anchors=anchors, ch=(filters[5], filters[6]))
+
+        dummy_img = torch.zeros(1, 3, 256, 256)
+        self.detect.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(dummy_img)])
         self.detect.anchors /= self.detect.stride.view(-1, 1, 1)
         self._check_anchor_order(self.detect)
-        self._initialize_biases()
+        self._initialize_biases(self.detect)
 
     def forward(self, x):
         p4, p5 = self.backbone(x)
         p4, p5 = self.head([p4, p5])
         return self.detect([p4, p5])
 
-    def _initialize_biases(self):  # initialize biases into Detect()
-        for m, s in zip(self.detect.m, self.detect.stride):  # from
-            b = m.bias.view(self.detect.na, -1)  # conv.bias(255) to (3,85)
-            b.data[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
-            b.data[:, 5:] += math.log(0.6 / (self.detect.nc - 0.999999))
-            m.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
-
-    # Reverse anchor order
     @staticmethod
-    def _check_anchor_order(m):
-        a = m.anchor_grid.prod(-1).view(-1)  # anchor area
+    def _make_divisible(x, divisor):
+        # Returns nearest x divisible by divisor
+        if isinstance(divisor, torch.Tensor):
+            divisor = int(divisor.max())  # to int
+        return math.ceil(x / divisor) * divisor
+
+    @staticmethod
+    def _initialize_biases(detect):
+        det = detect
+        for layer, stride in zip(det.m, det.stride):
+            b = layer.bias.view(det.na, -1)
+            b.data[:, 4] += math.log(8 / (640 / stride) ** 2)  # obj (8 objects per 640 image)
+            b.data[:, 5:] += math.log(0.6 / (det.nc - 0.999999))
+            layer.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+
+    @staticmethod
+    def _check_anchor_order(det):
+        a = det.anchors.prod(-1).view(-1)  # anchor area
         da = a[-1] - a[0]  # delta a
-        ds = m.stride[-1] - m.stride[0]  # delta s
+        ds = det.stride[-1] - det.stride[0]  # delta s
         if da.sign() != ds.sign():  # same order
-            m.anchors[:] = m.anchors.flip(0)
-            m.anchor_grid[:] = m.anchor_grid.flip(0)
+            det.anchors[:] = det.anchors.flip(0)
 
 
 if __name__ == '__main__':
     net = YOLOv3(anchors=anchors)
-    # net.eval() # error occurs, fixing...
+    net.eval()
+
     img = torch.randn(1, 3, 640, 640)
-    p4, p5 = net(img)
-    print(p4.shape, p5.shape)
-    print("Num. of parameters: {}".format(sum(p.numel() for p in net.parameters() if p.requires_grad)))
+    _, (p4, p5) = net(img)
+
+    print(f'P4.size(): {p4.size()}, \nP5.size(): {p5.size()}')
+    print("Number of parameters: {:.2f}M".format(sum(p.numel() for p in net.parameters() if p.requires_grad) / 1e6))
