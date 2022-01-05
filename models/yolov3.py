@@ -5,6 +5,7 @@
 import math
 import torch
 import torch.nn as nn
+from common import Conv, Bottleneck, Concat
 
 depth_multiple = 1.0  # model depth multiple
 width_multiple = 1.0  # layer channel multiple
@@ -12,52 +13,6 @@ width_multiple = 1.0  # layer channel multiple
 anchors = [[10, 13, 16, 30, 33, 23],  # P3/8
            [30, 61, 62, 45, 59, 119],  # P4/16
            [116, 90, 156, 198, 373, 326]]  # P5/32
-
-
-# Pad to 'same'
-def _pad(k, p=None):
-    if p is None:
-        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
-    return p
-
-
-# Standard convolution
-class Conv(nn.Module):
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
-        super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, _pad(k, p), groups=g, bias=False)
-        self.norm = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act else (act if isinstance(act, nn.Module) else nn.Identity())
-
-    def forward(self, x):
-        return self.act(self.norm(self.conv(x)))
-
-    def forward_fuse(self, x):
-        return self.act(self.conv(x))
-
-
-# Residual bottleneck
-class Bottleneck(nn.Module):
-    # Standard bottleneck
-    def __init__(self, c1, c2, shortcut=True, g=1, e=0.5):  # e-expansion
-        super(Bottleneck, self).__init__()
-        c_ = int(c2 * e)
-        self.conv1 = Conv(c1, c_, 1, 1)
-        self.conv2 = Conv(c_, c2, 3, 1, g=g)
-        self.add = shortcut and c1 == c2
-
-    def forward(self, x):
-        return x + self.conv2(self.conv1(x)) if self.add else self.conv2(self.conv1(x))
-
-
-# Concatenating list of layers
-class Concat(nn.Module):
-    def __init__(self, d=1):
-        super().__init__()
-        self.d = d
-
-    def __call__(self, x):
-        return torch.cat(x, self.d)
 
 
 # YOLOv3 backbone
@@ -199,6 +154,7 @@ class DETECT(nn.Module):
 
 # YOLOv3 Model
 class YOLOv3(nn.Module):
+
     def __init__(self, anchors):
         super(YOLOv3, self).__init__()
 
@@ -253,7 +209,7 @@ if __name__ == '__main__':
     net.eval()
 
     img = torch.randn(1, 3, 640, 640)
-    _, (p3, p4, p5) = net(img)
+    predictions, (p3, p4, p5) = net(img)
 
     print(f'P3.size(): {p3.size()}, \nP4.size(): {p4.size()}, \nP5.size(): {p5.size()}')
     print("Number of parameters: {:.2f}M".format(sum(p.numel() for p in net.parameters() if p.requires_grad) / 1e6))

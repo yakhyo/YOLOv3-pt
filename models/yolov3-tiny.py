@@ -2,10 +2,10 @@
 @author: Yakhyokhuja Valikhujaev <yakhyo9696@gmail.com>
 """
 
+import math
 import torch
 import torch.nn as nn
-import math
-
+from common import Conv, Concat
 depth_multiple = 1.0  # model depth multiple
 width_multiple = 1.0  # layer channel multiple
 
@@ -13,40 +13,9 @@ anchors = [[10, 14, 23, 27, 37, 58],
            [81, 82, 135, 169, 344, 319]]
 
 
-# Pad to 'same'
-def _pad(k, p=None):
-    if p is None:
-        p = k // 2 if isinstance(k, int) else [x // 2 for x in k]
-    return p
-
-
-# Standard convolution
-class Conv(nn.Module):
-    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, act=True):
-        super(Conv, self).__init__()
-        self.conv = nn.Conv2d(c1, c2, k, s, _pad(k, p), groups=g, bias=False)
-        self.norm = nn.BatchNorm2d(c2)
-        self.act = nn.SiLU() if act else (act if isinstance(act, nn.Module) else nn.Identity())
-
-    def forward(self, x):
-        return self.act(self.norm(self.conv(x)))
-
-    def forward_fuse(self, x):
-        return self.act(self.conv(x))
-
-
-# Concatenating list of layers
-class Concat(nn.Module):
-    def __init__(self, d=1):
-        super().__init__()
-        self.d = d
-
-    def __call__(self, x):
-        return torch.cat(x, self.d)
-
-
 # YOLOv3 Tiny Backbone
 class BACKBONE(nn.Module):
+
     def __init__(self, filters):
         super(BACKBONE, self).__init__()
         self.b0 = Conv(filters[0], filters[1], 3, 1)  # 0
@@ -83,6 +52,7 @@ class BACKBONE(nn.Module):
 
 # YOLOv3 Tiny Head
 class HEAD(nn.Module):
+
     def __init__(self, filters):
         super(HEAD, self).__init__()
         self.h13 = Conv(filters[6], filters[7], 3, 1)  # 13
@@ -155,6 +125,7 @@ class DETECT(nn.Module):
 
 # YOLOv3 Tiny Model
 class YOLOv3(nn.Module):
+
     def __init__(self, anchors):
         super(YOLOv3, self).__init__()
 
@@ -207,7 +178,7 @@ if __name__ == '__main__':
     net.eval()
 
     img = torch.randn(1, 3, 640, 640)
-    _, (p4, p5) = net(img)
+    predictions, (p4, p5) = net(img)
 
     print(f'P4.size(): {p4.size()}, \nP5.size(): {p5.size()}')
     print("Number of parameters: {:.2f}M".format(sum(p.numel() for p in net.parameters() if p.requires_grad) / 1e6))
